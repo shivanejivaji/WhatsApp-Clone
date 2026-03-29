@@ -94,6 +94,33 @@ async function initializeChat() {
     videoModalInstance = new bootstrap.Modal(videoModalElement);
     voiceModalInstance = new bootstrap.Modal(voiceModalElement);
 
+    // Mobile sidebar toggle controls
+    const menuToggleBtn = document.getElementById('menuToggleBtn');
+    const menuOverlay = document.getElementById('menuOverlay');
+    const sidebar = document.getElementById('sidebar');
+    const backToUsersBtn = document.getElementById('backToUsersBtn');
+
+    function openSidebar() {
+        sidebar.classList.add('open');
+        if (menuOverlay) menuOverlay.classList.add('active');
+    }
+
+    function closeSidebar() {
+        sidebar.classList.remove('open');
+        if (menuOverlay) menuOverlay.classList.remove('active');
+    }
+
+    menuToggleBtn?.addEventListener('click', () => {
+        if (sidebar.classList.contains('open')) closeSidebar(); else openSidebar();
+    });
+
+    menuOverlay?.addEventListener('click', closeSidebar);
+
+    backToUsersBtn?.addEventListener('click', () => {
+        // show sidebar again on mobile
+        openSidebar();
+    });
+
     // Close video modal on end call
     videoModalElement.addEventListener('hidden.bs.modal', () => {
         if (currentCall) {
@@ -443,6 +470,13 @@ async function initializeChat() {
         chatMessages.innerHTML = '';
         // request chat history with selected user
         socket.emit('fetch-messages', { withUsername: user.username });
+        // on small devices, close the sidebar so chat is visible
+        if (window.innerWidth <= 768) {
+            const sb = document.getElementById('sidebar');
+            const overlay = document.getElementById('menuOverlay');
+            sb && sb.classList.remove('open');
+            overlay && overlay.classList.remove('active');
+        }
         showSystemMessage(`You are now chatting with ${user.username}`, 'success');
         messageInput.focus();
     }
