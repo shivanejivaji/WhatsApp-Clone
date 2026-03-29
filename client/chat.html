@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="theme-color" content="#075e54">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <title>WhatsApp Clone - Chat</title>
+    
+    <!-- Bootstrap 5 CSS CDN -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Font Awesome 6 CDN -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="style.css">
+    
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="https://unpkg.com/peerjs@1.4.7/dist/peerjs.min.js"></script>
+</head>
+<body>
+    <div class="app-container">
+        <!-- Mobile Header - Only visible on mobile -->
+        <div class="mobile-header d-md-none">
+            <button id="menuToggleBtn" class="menu-toggle-btn">
+                <i class="fas fa-bars"></i>
+            </button>
+            <div class="mobile-header-title">
+                <i class="fab fa-whatsapp me-2"></i>
+                <span>WhatsApp Clone</span>
+            </div>
+            <div class="mobile-header-actions">
+                <button id="mobileCallBtn" class="mobile-call-btn" style="display: none;">
+                    <i class="fas fa-video"></i>
+                </button>
+            </div>
+        </div>
+
+        <!-- Sidebar - User List (Sliding on mobile) -->
+        <div class="sidebar bg-white shadow-sm" id="sidebar">
+            <div class="sidebar-header bg-success text-white p-3">
+                <div class="d-flex align-items-center justify-content-between">
+                    <div class="d-flex align-items-center gap-3">
+                        <div class="avatar-circle bg-white text-success">
+                            <span id="userInitial" class="fw-bold"></span>
+                        </div>
+                        <div class="user-info-mobile">
+                            <h5 class="mb-0 fw-bold" id="currentUsername">Loading...</h5>
+                            <small class="opacity-75" id="currentRoom">Room: general</small>
+                        </div>
+                    </div>
+                    <button id="logoutBtn" class="btn btn-light btn-sm rounded-pill">
+                        <i class="fas fa-sign-out-alt me-1"></i><span class="d-none d-sm-inline">Exit</span>
+                    </button>
+                </div>
+            </div>
+            
+            <div class="users-section">
+                <div class="section-header p-3 border-bottom bg-light">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <h6 class="mb-0 fw-bold text-secondary">
+                            <i class="fas fa-users me-2 text-success"></i>Chats
+                        </h6>
+                        <span id="onlineCount" class="badge bg-success rounded-pill">0 online</span>
+                    </div>
+                </div>
+                <div class="users-list" id="usersList">
+                    <div class="text-center py-4 text-muted">
+                        <i class="fas fa-spinner fa-spin fa-2x mb-2"></i>
+                        <p class="mb-0">Loading users...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Main Chat Area -->
+        <div class="main-content d-flex flex-column" id="mainContent">
+            <!-- Video Call Modal -->
+            <div class="modal fade" id="videoModal" tabindex="-1" data-bs-backdrop="static">
+                <div class="modal-dialog modal-fullscreen-sm-down modal-xl modal-dialog-centered">
+                    <div class="modal-content bg-dark">
+                        <div class="modal-header bg-success text-white py-2 py-sm-3">
+                            <h5 class="modal-title" id="callWithUser">
+                                <i class="fas fa-video me-2"></i>Video Call
+                            </h5>
+                            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                        </div>
+                        <div class="modal-body p-2 p-sm-3">
+                            <div class="row g-2 g-sm-3">
+                                <div class="col-12 col-md-6 mb-3 mb-md-0">
+                                    <div class="video-wrapper bg-black rounded-3 overflow-hidden position-relative">
+                                        <video id="localVideo" autoplay muted playsinline class="w-100 h-100 object-fit-cover"></video>
+                                        <div class="video-label bg-dark bg-opacity-75 text-white px-2 py-1 rounded">
+                                            <i class="fas fa-user me-1"></i>You
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="col-12 col-md-6">
+                                    <div class="video-wrapper bg-black rounded-3 overflow-hidden position-relative">
+                                        <video id="remoteVideo" autoplay playsinline class="w-100 h-100 object-fit-cover"></video>
+                                        <div class="video-label bg-dark bg-opacity-75 text-white px-2 py-1 rounded" id="remoteVideoLabel">
+                                            <i class="fas fa-user me-1"></i>Remote User
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="modal-footer bg-dark border-secondary py-2 py-sm-3">
+                            <div class="d-flex gap-2 w-100 justify-content-center flex-wrap">
+                                <button id="muteAudioBtn" class="btn btn-secondary rounded-pill btn-sm btn-md">
+                                    <i class="fas fa-microphone me-1"></i><span class="d-none d-sm-inline">Mute</span>
+                                </button>
+                                <button id="disableVideoBtn" class="btn btn-secondary rounded-pill btn-sm btn-md">
+                                    <i class="fas fa-video me-1"></i><span class="d-none d-sm-inline">Disable</span>
+                                </button>
+                                <button id="endCallBtn" class="btn btn-danger rounded-pill btn-sm btn-md">
+                                    <i class="fas fa-phone-slash me-1"></i><span class="d-none d-sm-inline">End Call</span>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Voice Recording Modal -->
+            <div class="modal fade" id="voiceModal" tabindex="-1">
+                <div class="modal-dialog modal-dialog-centered modal-sm">
+                    <div class="modal-content">
+                        <div class="modal-header bg-success text-white py-2">
+                            <h5 class="modal-title">
+                                <i class="fas fa-microphone-alt me-2"></i>Voice Message
+                            </h5>
+                            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                        </div>
+                        <div class="modal-body text-center p-4">
+                            <div class="recording-timer display-4 fw-bold text-success mb-3" id="recordingTimer">0:00</div>
+                            <div class="waveform mb-4" id="waveform">
+                                <div class="wave-bar"></div><div class="wave-bar"></div><div class="wave-bar"></div>
+                                <div class="wave-bar"></div><div class="wave-bar"></div><div class="wave-bar"></div>
+                                <div class="wave-bar"></div><div class="wave-bar"></div><div class="wave-bar"></div>
+                            </div>
+                            <div class="d-flex gap-2 justify-content-center flex-wrap">
+                                <button id="startRecordingBtn" class="btn btn-danger rounded-pill px-3 px-sm-4">
+                                    <i class="fas fa-circle me-1"></i>Record
+                                </button>
+                                <button id="stopRecordingBtn" class="btn btn-warning rounded-pill px-3 px-sm-4" style="display: none;">
+                                    <i class="fas fa-stop me-1"></i>Stop
+                                </button>
+                                <button id="sendVoiceBtn" class="btn btn-success rounded-pill px-3 px-sm-4" style="display: none;">
+                                    <i class="fas fa-paper-plane me-1"></i>Send
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Chat Header -->
+            <div class="chat-header bg-white border-bottom p-2 p-sm-3" id="chatHeader">
+                <div class="d-flex align-items-center justify-content-between">
+                    <div class="d-flex align-items-center gap-2 gap-sm-3">
+                        <button id="backToUsersBtn" class="back-to-users-btn d-md-none" style="display: none;">
+                            <i class="fas fa-arrow-left"></i>
+                        </button>
+                        <div class="avatar-circle bg-success bg-opacity-10 text-success">
+                            <span id="chatInitial" class="fw-bold">?</span>
+                        </div>
+                        <div>
+                            <h5 class="mb-0 fw-bold" id="chatWithUser">Select a user</h5>
+                            <small class="text-muted" id="userStatus">
+                                <i class="fas fa-circle text-success me-1" style="font-size: 8px;"></i>
+                                <span class="status-text">Click to start</span>
+                            </small>
+                        </div>
+                    </div>
+                    <div class="d-flex gap-2">
+                        <button id="voiceMessageBtn" class="btn btn-outline-success rounded-circle" style="display: none;" title="Voice Message">
+                            <i class="fas fa-microphone-alt"></i>
+                        </button>
+                        <button id="startCallBtn" class="btn btn-success rounded-pill" style="display: none;">
+                            <i class="fas fa-video me-1"></i><span class="d-none d-sm-inline">Call</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Chat Messages Area -->
+            <div class="chat-messages flex-grow-1 p-2 p-sm-3 overflow-auto" id="chatMessages">
+                <div class="text-center py-5">
+                    <i class="fas fa-comments fa-3x text-muted mb-3"></i>
+                    <p class="text-muted px-3">👋 Welcome!<br>Select a user to start chatting</p>
+                </div>
+            </div>
+            
+            <!-- Chat Input -->
+            <div class="chat-input-container bg-white border-top p-2 p-sm-3" id="chatInputContainer" style="display: none;">
+                <div class="input-group">
+                    <button id="attachFileBtn" class="btn btn-outline-secondary rounded-circle me-2" title="Attach file">
+                        <i class="fas fa-paperclip"></i>
+                    </button>
+                    <input type="text" id="messageInput" class="form-control rounded-pill" 
+                           placeholder="Type a message" autocomplete="off" enterkeyhint="send">
+                    <button id="sendBtn" class="btn btn-success rounded-circle ms-2">
+                        <i class="fas fa-paper-plane"></i>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Mobile Menu Overlay -->
+    <div class="menu-overlay d-md-none" id="menuOverlay"></div>
+
+    <!-- Hidden file input -->
+    <input type="file" id="fileInput" style="display: none;" accept="image/*,video/*,audio/*">
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="script.js"></script>
+</body>
+</html>

@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+
+    <!-- ✅ FIX: Proper viewport -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <meta name="theme-color" content="#075e54">
+    <title>WhatsApp Clone - Login</title>
+
+    <!-- Bootstrap 5 -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body class="bg-gradient">
+    <div class="container min-vh-100 d-flex align-items-center justify-content-center px-3">
+        <div class="row justify-content-center w-100">
+            <div class="col-12 col-sm-10 col-md-8 col-lg-5 col-xl-4">
+                <div class="card shadow-lg border-0 rounded-4">
+                    <div class="card-body p-4 p-sm-5">
+
+                        <!-- Header -->
+                        <div class="text-center mb-4">
+                            <i class="fab fa-whatsapp fa-4x text-success mb-3"></i>
+                            <h1 class="h3 fw-bold">WhatsApp Clone</h1>
+                            <p class="text-muted small">Connect with friends and family</p>
+                        </div>
+
+                        <!-- Form -->
+                        <form id="login-form">
+                            <div class="mb-3">
+                                <label for="username" class="form-label fw-semibold">
+                                    <i class="fas fa-user text-success me-2"></i>Username
+                                </label>
+
+                                <!-- ✅ FIX: minlength added -->
+                                <input type="text" class="form-control form-control-lg rounded-pill" id="username"
+                                    placeholder="Enter your username" required minlength="3" autocomplete="off">
+                            </div>
+
+                            <div class="mb-4">
+                                <label for="room" class="form-label fw-semibold">
+                                    <i class="fas fa-hashtag text-success me-2"></i>Room Name
+                                </label>
+
+                                <input type="text" class="form-control form-control-lg rounded-pill" id="room"
+                                    placeholder="Room name" value="general" required>
+                            </div>
+
+                            <button type="submit" class="btn btn-success btn-lg w-100 rounded-pill py-3">
+                                <i class="fas fa-sign-in-alt me-2"></i>Join Chat
+                            </button>
+                        </form>
+
+                        <div class="text-center mt-4">
+                            <small class="text-muted">
+                                <i class="fas fa-shield-alt me-1"></i>Secure & Encrypted
+                            </small>
+                        </div>
+
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+
+    <!-- ✅ FIX: Load script AFTER DOM -->
+    <script src="script.js"></script>
+</body>
+
+</html>
