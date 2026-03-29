@@ -11,6 +11,8 @@ let currentChatUser = null;
 let currentCallUser = null;
 let isAudioMuted = false;
 let isVideoDisabled = false;
+// prevent concurrent camera startups
+let isStartingLocalVideo = false;
 
 // Media recording variables
 let mediaRecorder;
@@ -202,7 +204,7 @@ async function initializeChat() {
     });
 
     socket.on('user-connected', (data) => {
-        console.log('User connected:', data);
+        console.log('User connected:', data && data.username ? data.username : data);
         showSystemMessage(`${data.username} joined the chat`, 'info');
         showNotification(data.username, 'joined the chat');
     });
@@ -693,23 +695,50 @@ async function initializeChat() {
     }
 
     async function startLocalVideo() {
+        if (isStartingLocalVideo) {
+            // already trying — return whether we have a stream
+            return !!localStream;
+        }
+
+        isStartingLocalVideo = true;
         try {
-            const stream = await navigator.mediaDevices.getUserMedia({
-                video: true,
-                audio: true
-            });
-            localStream = stream;
-            localVideo.srcObject = stream;
-            return true;
+            // try progressively degraded constraints to reduce chance of timeout
+            const constraintsList = [
+                { video: true, audio: true },
+                { video: { width: { ideal: 640 } }, audio: true },
+                { video: false, audio: true }
+            ];
+
+            let lastErr = null;
+            for (const constraints of constraintsList) {
+                try {
+                    const stream = await navigator.mediaDevices.getUserMedia(constraints);
+                    localStream = stream;
+                    localVideo.srcObject = stream;
+                    isStartingLocalVideo = false;
+                    return true;
+                } catch (err) {
+                    lastErr = err;
+                    console.warn('getUserMedia attempt failed:', err && err.name, err && err.message);
+                    // if permissions denied, don't keep retrying
+                    if (err && err.name === 'NotAllowedError') break;
+                }
+            }
+
+            // if we fall through, throw last error to be handled below
+            throw lastErr;
         } catch (err) {
             console.error('Error accessing camera:', err);
-            if (err.name === 'NotAllowedError') {
+            if (err && err.name === 'NotAllowedError') {
                 showAlert('Camera permission denied. Please allow camera access.', 'danger');
-            } else if (err.name === 'NotFoundError') {
+            } else if (err && err.name === 'NotFoundError') {
                 showAlert('No camera found on this device.', 'danger');
+            } else if (err && err.name === 'AbortError') {
+                showAlert('Timeout starting video source. Close other apps using the camera and try again.', 'danger');
             } else {
-                showAlert('Error accessing camera: ' + err.message, 'danger');
+                showAlert('Error accessing camera: ' + (err && err.message ? err.message : String(err)), 'danger');
             }
+            isStartingLocalVideo = false;
             return false;
         }
     }
