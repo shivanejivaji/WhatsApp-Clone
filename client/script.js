@@ -542,11 +542,36 @@ async function initializeChat() {
         }
     });
 
+    // Detect screen sharing support and disable button on unsupported devices (common on mobile)
+    try {
+        const supportsScreenShare = !!(
+            (navigator.mediaDevices && typeof navigator.mediaDevices.getDisplayMedia === 'function') ||
+            typeof navigator.getDisplayMedia === 'function'
+        );
+        if (!supportsScreenShare) {
+            shareScreenBtn.disabled = true;
+            shareScreenBtn.title = 'Screen sharing not supported on this device/browser';
+        }
+    } catch (e) {
+        // feature detection failed — be conservative and disable
+        shareScreenBtn.disabled = true;
+        shareScreenBtn.title = 'Screen sharing not supported on this device/browser';
+    }
+
     async function startScreenShare() {
         if (!currentCall) return;
-        
+        // Many mobile browsers (and in-app webviews) do not support getDisplayMedia.
+        // Try both standards and legacy API variants; if unavailable, inform the user.
+        let stream = null;
         try {
-            const stream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+            if (navigator.mediaDevices && typeof navigator.mediaDevices.getDisplayMedia === 'function') {
+                stream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+            } else if (typeof navigator.getDisplayMedia === 'function') {
+                stream = await navigator.getDisplayMedia({ video: true });
+            } else {
+                showAlert('Screen sharing is not supported on this device/browser. Use desktop Chrome/Firefox for screen sharing.', 'warning');
+                return;
+            }
             screenStream = stream;
             
             // Replace track in PeerConnection
@@ -569,8 +594,13 @@ async function initializeChat() {
             
         } catch (err) {
             console.error('Error sharing screen:', err);
-            if (err.name !== 'NotAllowedError') {
-                showAlert('Could not share screen: ' + err.message, 'danger');
+            // Friendly messages for common cases
+            if (err && (err.name === 'NotAllowedError' || err.name === 'SecurityError')) {
+                showAlert('Screen sharing permission denied or blocked by the browser.', 'warning');
+            } else if (err && err.name === 'NotFoundError') {
+                showAlert('No screen capture source found.', 'warning');
+            } else {
+                showAlert('Could not share screen: ' + (err && err.message ? err.message : String(err)), 'danger');
             }
         }
     }
