@@ -3,6 +3,7 @@ let socket;
 let peer;
 let localStream;
 let remoteStream;
+let screenStream;
 let currentCall;
 let currentUsername;
 let currentRoom;
@@ -14,6 +15,11 @@ let isVideoDisabled = false;
 // prevent concurrent camera startups
 let isStartingLocalVideo = false;
 
+// Call state management
+let callState = 'idle'; // idle, calling, ringing, in-call, ended
+let incomingCallData = null;
+let pendingCallObject = null;
+
 // Media recording variables
 let mediaRecorder;
 let recordedChunks = [];
@@ -24,6 +30,10 @@ let mediaStream;
 // Bootstrap modal instances
 let videoModalInstance;
 let voiceModalInstance;
+let incomingCallModalInstance;
+
+// Audio elements
+const ringtone = document.getElementById('ringtone');
 
 // DOM Elements
 const loginForm = document.getElementById('login-form');
@@ -79,6 +89,8 @@ async function initializeChat() {
     const endCallBtn = document.getElementById('endCallBtn');
     const muteAudioBtn = document.getElementById('muteAudioBtn');
     const disableVideoBtn = document.getElementById('disableVideoBtn');
+    const shareScreenBtn = document.getElementById('shareScreenBtn');
+    const screenShareIndicator = document.getElementById('screenShareIndicator');
     const callWithUser = document.getElementById('callWithUser');
     const remoteVideoLabel = document.getElementById('remoteVideoLabel');
     const attachFileBtn = document.getElementById('attachFileBtn');
@@ -88,11 +100,138 @@ async function initializeChat() {
     const sendVoiceBtn = document.getElementById('sendVoiceBtn');
     const recordingTimerElem = document.getElementById('recordingTimer');
 
+    // Call timer elements & state
+    const callTimerElem = document.getElementById('callTimer');
+    let callTimerInterval = null;
+    let callSeconds = 0;
+
+    function formatTime(seconds) {
+        const m = Math.floor(seconds / 60);
+        const s = seconds % 60;
+        return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+    }
+
+    function startCallTimer() {
+        // ensure only one timer runs
+        if (callTimerInterval) clearInterval(callTimerInterval);
+        callSeconds = 0;
+        if (callTimerElem) {
+            callTimerElem.textContent = formatTime(callSeconds);
+            callTimerElem.style.display = 'inline-block';
+        }
+        callTimerInterval = setInterval(() => {
+            callSeconds++;
+            if (callTimerElem) callTimerElem.textContent = formatTime(callSeconds);
+        }, 1000);
+    }
+
+    function stopCallTimer() {
+        if (callTimerInterval) {
+            clearInterval(callTimerInterval);
+            callTimerInterval = null;
+        }
+    }
+
+    function resetCallTimer() {
+        stopCallTimer();
+        callSeconds = 0;
+        if (callTimerElem) {
+            callTimerElem.textContent = formatTime(0);
+            callTimerElem.style.display = 'none';
+        }
+    }
+
     // Initialize Bootstrap modals
     const videoModalElement = document.getElementById('videoModal');
     const voiceModalElement = document.getElementById('voiceModal');
+    const incomingCallModalElement = document.getElementById('incomingCallModal');
     videoModalInstance = new bootstrap.Modal(videoModalElement);
     voiceModalInstance = new bootstrap.Modal(voiceModalElement);
+    incomingCallModalInstance = new bootstrap.Modal(incomingCallModalElement);
+
+    // Call state UI elements
+    const callerNameElem = document.getElementById('callerName');
+    const callerInitialElem = document.getElementById('callerInitial');
+    const acceptCallBtn = document.getElementById('acceptCallBtn');
+    const rejectCallBtn = document.getElementById('rejectCallBtn');
+
+    acceptCallBtn.addEventListener('click', () => {
+        if (incomingCallData) {
+            handleAcceptCall();
+        }
+    });
+
+    rejectCallBtn.addEventListener('click', () => {
+        if (incomingCallData) {
+            handleRejectCall();
+        }
+    });
+
+    function playRingtone() {
+        const rt = document.getElementById('ringtone');
+        if (rt) rt.play().catch(e => console.log('Ringtone play failed:', e));
+    }
+
+    function stopRingtone() {
+        const rt = document.getElementById('ringtone');
+        if (rt) {
+            rt.pause();
+            rt.currentTime = 0;
+        }
+    }
+
+    async function handleAcceptCall() {
+        stopRingtone();
+        incomingCallModalInstance.hide();
+        
+        socket.emit('answer-call', { to: incomingCallData.from });
+        
+        const ok = await startLocalVideo();
+        if (!ok) {
+            showAlert('Unable to access camera/mic to answer the call', 'danger');
+            handleRejectCall();
+            return;
+        }
+
+        if (pendingCallObject) {
+            pendingCallObject.answer(localStream);
+            currentCall = pendingCallObject;
+            currentCallUser = { socketId: incomingCallData.from, username: incomingCallData.fromUsername };
+            callState = 'in-call';
+
+            currentCall.on('stream', (stream) => {
+                remoteStream = stream;
+                remoteVideo.srcObject = stream;
+                videoModalInstance.show();
+                remoteVideoLabel.innerHTML = `<i class="fas fa-user me-1"></i>${incomingCallData.fromUsername}`;
+                callWithUser.innerHTML = `<i class="fas fa-video me-2"></i>Call with ${incomingCallData.fromUsername}`;
+                startCallTimer();
+            });
+
+            currentCall.on('close', () => {
+                endCall();
+            });
+        }
+    }
+
+    function handleRejectCall() {
+        stopRingtone();
+        incomingCallModalInstance.hide();
+        
+        if (incomingCallData) {
+            socket.emit('reject-call', { to: incomingCallData.from });
+        }
+        
+        if (pendingCallObject) {
+            pendingCallObject.close();
+        }
+        
+        incomingCallData = null;
+        pendingCallObject = null;
+        // Reset timer UI
+        resetCallTimer();
+        callState = 'idle';
+    }
 
     // Mobile sidebar toggle controls
     const menuToggleBtn = document.getElementById('menuToggleBtn');
@@ -160,6 +299,8 @@ async function initializeChat() {
         if (reason === 'io client disconnect') return; // manual disconnect
         console.warn('Socket disconnected:', reason);
         showSystemMessage('Disconnected from server', 'warning');
+        // ensure any active call is ended and timer stopped
+        try { endCall(); } catch (e) { /* ignore */ }
     });
 
     // Initialize PeerJS
@@ -189,40 +330,26 @@ async function initializeChat() {
 
     // Handle incoming PeerJS call (MediaConnection)
     peer.on('call', async (call) => {
-        // show a simple accept/reject prompt
-        const fromUsername = call.metadata?.fromUsername || 'Unknown';
-        const accept = confirm(`${fromUsername} is calling you. Accept?`);
-
-        if (!accept) {
-            try { call.close(); } catch (e) { /* ignore */ }
-            // try to notify caller via socket if metadata includes socket id
-            if (call.metadata?.fromSocketId) {
-                socket.emit('reject-call', { to: call.metadata.fromSocketId });
+        // Just store the call object, we will answer it when the user clicks Accept in the socket handler
+        pendingCallObject = call;
+        
+        // In case peer call arrives before socket event, or if socket event failed
+        if (callState !== 'ringing') {
+            console.log('Peer call arrived before socket event');
+            // We can wait for socket event or show UI here if we have metadata
+            if (call.metadata?.fromUsername) {
+                incomingCallData = {
+                    from: call.metadata.fromSocketId,
+                    fromUsername: call.metadata.fromUsername
+                };
+                
+                callerNameElem.textContent = incomingCallData.fromUsername;
+                callerInitialElem.textContent = incomingCallData.fromUsername.charAt(0).toUpperCase();
+                incomingCallModalInstance.show();
+                playRingtone();
+                callState = 'ringing';
             }
-            return;
         }
-
-        const ok = await startLocalVideo();
-        if (!ok) {
-            showAlert('Unable to access camera/mic to answer the call', 'danger');
-            return;
-        }
-
-        // answer the call with our local stream
-        call.answer(localStream);
-        currentCall = call;
-
-        call.on('stream', (stream) => {
-            remoteStream = stream;
-            remoteVideo.srcObject = stream;
-            videoModalInstance.show();
-            remoteVideoLabel.innerHTML = `<i class="fas fa-user me-1"></i>${fromUsername}`;
-            callWithUser.innerHTML = `<i class="fas fa-video me-2"></i>Call with ${fromUsername}`;
-        });
-
-        call.on('close', () => {
-            endCall();
-        });
     });
 
     // Socket.IO event handlers
@@ -286,12 +413,26 @@ async function initializeChat() {
 
     // Video call notification (lightweight). Actual PeerJS call object handled in peer.on('call')
     socket.on('incoming-call', async (data) => {
+        if (callState !== 'idle') {
+            // Busy, reject or notify
+            console.log('Already in a call, ignoring incoming call from:', data.fromUsername);
+            return;
+        }
+
         console.log('Incoming call from:', data.fromUsername);
-        showSystemMessage(`${data.fromUsername} is calling...`, 'info');
+        incomingCallData = data;
+        callState = 'ringing';
+
+        callerNameElem.textContent = data.fromUsername;
+        callerInitialElem.textContent = data.fromUsername.charAt(0).toUpperCase();
+        incomingCallModalInstance.show();
+        playRingtone();
     });
 
     socket.on('call-answered', async (data) => {
         console.log('Call answered');
+        callState = 'in-call';
+        // When we are the caller, we wait for the PeerJS stream to arrive
         if (currentCall) {
             currentCall.on('stream', (stream) => {
                 remoteStream = stream;
@@ -299,17 +440,16 @@ async function initializeChat() {
                 videoModalInstance.show();
                 remoteVideoLabel.innerHTML = `<i class="fas fa-user me-1"></i>${currentCallUser.username}`;
                 callWithUser.innerHTML = `<i class="fas fa-video me-2"></i>Call with ${currentCallUser.username}`;
+                startCallTimer();
             });
         }
     });
 
     socket.on('call-rejected', () => {
-        showSystemMessage('Call rejected', 'warning');
         endCall();
     });
 
     socket.on('call-ended', () => {
-        showSystemMessage('Call ended', 'info');
         endCall();
     });
 
@@ -393,6 +533,69 @@ async function initializeChat() {
             }
         }
     });
+
+    shareScreenBtn.addEventListener('click', () => {
+        if (screenStream) {
+            stopScreenShare();
+        } else {
+            startScreenShare();
+        }
+    });
+
+    async function startScreenShare() {
+        if (!currentCall) return;
+        
+        try {
+            const stream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+            screenStream = stream;
+            
+            // Replace track in PeerConnection
+            const videoTrack = screenStream.getVideoTracks()[0];
+            const sender = currentCall.peerConnection.getSenders().find(s => s.track.kind === 'video');
+            if (sender) {
+                sender.replaceTrack(videoTrack);
+            }
+            
+            // Update UI
+            localVideo.srcObject = screenStream;
+            shareScreenBtn.innerHTML = '<i class="fas fa-stop me-1"></i>Stop Sharing';
+            shareScreenBtn.classList.replace('btn-info', 'btn-warning');
+            screenShareIndicator.style.display = 'block';
+            
+            // Handle manual stop from browser UI
+            videoTrack.onended = () => {
+                stopScreenShare();
+            };
+            
+        } catch (err) {
+            console.error('Error sharing screen:', err);
+            if (err.name !== 'NotAllowedError') {
+                showAlert('Could not share screen: ' + err.message, 'danger');
+            }
+        }
+    }
+
+    async function stopScreenShare() {
+        if (screenStream) {
+            screenStream.getTracks().forEach(track => track.stop());
+            screenStream = null;
+        }
+        
+        // Switch back to camera
+        if (localStream) {
+            const videoTrack = localStream.getVideoTracks()[0];
+            const sender = currentCall?.peerConnection.getSenders().find(s => s.track.kind === 'video');
+            if (sender && videoTrack) {
+                sender.replaceTrack(videoTrack);
+            }
+            localVideo.srcObject = localStream;
+        }
+        
+        // Update UI
+        shareScreenBtn.innerHTML = '<i class="fas fa-desktop me-1"></i>Share Screen';
+        shareScreenBtn.classList.replace('btn-warning', 'btn-info');
+        screenShareIndicator.style.display = 'none';
+    }
 
     function updateUserList(users) {
         const otherUsers = users.filter(user => user.socketId !== socket.id);
@@ -506,60 +709,139 @@ async function initializeChat() {
         }
     }
 
+    let isUploadingFile = false;
     async function handleFileUpload(event) {
         const file = event.target.files[0];
-        if (!file || !currentChatUser) return;
+        if (!file || !currentChatUser) {
+            fileInput.value = '';
+            return;
+        }
+
+        if (isUploadingFile) {
+            showAlert('Upload already in progress', 'warning');
+            fileInput.value = '';
+            return;
+        }
 
         const fileType = file.type.split('/')[0];
         const validTypes = ['image', 'video', 'audio'];
 
         if (!validTypes.includes(fileType)) {
             showAlert('Please select an image, video, or audio file', 'warning');
+            fileInput.value = '';
             return;
         }
 
         if (file.size > 50 * 1024 * 1024) {
             showAlert('File size must be less than 50MB', 'warning');
+            fileInput.value = '';
             return;
         }
 
+        isUploadingFile = true;
+        setAttachUploading(true);
         try {
             const reader = new FileReader();
             reader.onload = async (e) => {
                 const fileData = e.target.result;
 
-                socket.emit('file-upload', {
+                // lightweight client-side dedupe key: filename + first 64 chars
+                const dedupeKey = file.name + '|' + (typeof file.size === 'number' ? file.size : '') + '|' + (fileData.slice ? fileData.slice(0, 64) : '');
+
+                console.debug('Uploading file', { name: file.name, size: file.size, to: currentChatUser && currentChatUser.socketId });
+                const attemptUpload = (attempt = 1) => {
+                    socket.emit('file-upload', {
                     fileData: fileData,
                     fileName: file.name,
                     fileType: fileType,
                     username: currentUsername,
                     to: currentChatUser.socketId,
-                    toUsername: currentChatUser.username
-                }, (response) => {
-                    if (response.success) {
-                        const timestamp = new Date().toLocaleTimeString();
-                        displayMediaMessage({
-                            message: `<i class="fas fa-paperclip me-1"></i>${fileType.toUpperCase()}: ${file.name}`,
-                            username: currentUsername,
-                            timestamp: timestamp,
-                            isOwn: true,
-                            type: fileType,
-                            mediaUrl: response.url,
-                            mediaName: file.name
-                        });
-                        showAlert('File uploaded successfully!', 'success');
-                    } else {
-                        showAlert('File upload failed: ' + response.error, 'danger');
-                    }
-                });
+                    toUsername: currentChatUser.username,
+                    dedupeKey
+                    }, (response) => {
+                        console.debug('Upload response', response, 'attempt', attempt);
+                        if (response && response.success) {
+                            const timestamp = new Date().toLocaleTimeString();
+                            displayMediaMessage({
+                                message: `<i class="fas fa-paperclip me-1"></i>${fileType.toUpperCase()}: ${file.name}`,
+                                username: currentUsername,
+                                timestamp: timestamp,
+                                isOwn: true,
+                                type: fileType,
+                                mediaUrl: response.url,
+                                mediaName: file.name
+                            });
+                            showAlert('File uploaded successfully!', 'success');
+                            isUploadingFile = false;
+                            setAttachUploading(false);
+                            fileInput.value = '';
+                            return;
+                        }
+
+                        const err = response && response.error ? response.error : 'unknown_error';
+                        // handle duplicate specially
+                        if (err === 'duplicate') {
+                            showAlert('Duplicate file ignored by server', 'warning');
+                            console.info('Server reported duplicate upload');
+                            isUploadingFile = false;
+                            setAttachUploading(false);
+                            fileInput.value = '';
+                            return;
+                        }
+
+                        // if server reported file too large or invalid type, show message
+                        if (err === 'file_too_large') {
+                            showAlert('Upload rejected: file is too large', 'danger');
+                        } else if (err === 'invalid_type') {
+                            showAlert('Upload rejected: invalid file type', 'danger');
+                        } else {
+                            showAlert('File upload failed: ' + err, 'danger');
+                        }
+
+                        // retry once for transient server errors
+                        if (attempt < 2 && (err === 'server_error' || err === 'unknown_error')) {
+                            console.debug('Retrying upload, attempt', attempt + 1);
+                            setTimeout(() => attemptUpload(attempt + 1), 800);
+                            return;
+                        }
+
+                        isUploadingFile = false;
+                        setAttachUploading(false);
+                        fileInput.value = '';
+                    });
+                };
+
+                attemptUpload(1);
             };
             reader.readAsDataURL(file);
         } catch (err) {
             console.error('File upload error:', err);
             showAlert('Failed to upload file', 'danger');
+            isUploadingFile = false;
+            setAttachUploading(false);
+            fileInput.value = '';
         }
+    }
 
-        fileInput.value = '';
+    // UI helper: show small spinner and disable attach while uploading
+    function setAttachUploading(active) {
+        const attachBtn = document.getElementById('attachFileBtn');
+        if (!attachBtn) return;
+        attachBtn.disabled = !!active;
+        let spinner = document.getElementById('attachSpinner');
+        if (active) {
+            if (!spinner) {
+                spinner = document.createElement('span');
+                spinner.id = 'attachSpinner';
+                spinner.className = 'spinner-wrapper ms-2';
+                spinner.style.width = '16px';
+                spinner.style.height = '16px';
+                spinner.style.borderWidth = '2px';
+                attachBtn.parentNode.insertBefore(spinner, attachBtn.nextSibling);
+            }
+        } else {
+            if (spinner) spinner.remove();
+        }
     }
 
     function displayMediaMessage(data) {
@@ -615,6 +897,34 @@ async function initializeChat() {
                         <div class="voice-duration ms-2">${data.duration || '0:00'}</div>
                     </div>
                 `;
+                break;
+            case 'file':
+                // Generic file attachment (pdf, docx, zip, etc.)
+                content = `
+                    <div class="file-attachment d-flex align-items-center gap-2 p-2 rounded bg-white border">
+                        <i class="fas fa-file-alt fa-2x text-secondary"></i>
+                        <div class="flex-grow-1">
+                            <div class="fw-semibold small">${data.mediaName || 'Attachment'}</div>
+                            <a href="${data.mediaUrl}" target="_blank" rel="noopener noreferrer" download="${data.mediaName || ''}" class="small text-muted">Open / Download</a>
+                        </div>
+                    </div>
+                `;
+                break;
+            default:
+                // Fallback for unknown media types — render link if available
+                if (data.mediaUrl) {
+                    content = `
+                        <div class="file-attachment d-flex align-items-center gap-2 p-2 rounded bg-white border">
+                            <i class="fas fa-file fa-2x text-secondary"></i>
+                            <div class="flex-grow-1">
+                                <div class="fw-semibold small">${data.mediaName || data.message || 'File'}</div>
+                                <a href="${data.mediaUrl}" target="_blank" rel="noopener noreferrer" download class="small text-muted">Open / Download</a>
+                            </div>
+                        </div>
+                    `;
+                } else {
+                    content = `<div class="message-text">${data.message || 'File'}</div>`;
+                }
                 break;
         }
 
@@ -783,12 +1093,16 @@ async function initializeChat() {
             return;
         }
 
+        if (callState !== 'idle') return;
+
         if (!localStream) {
             const success = await startLocalVideo();
             if (!success) return;
         }
 
         currentCallUser = currentChatUser;
+        callState = 'calling';
+        showSystemMessage(`Calling ${currentChatUser.username}...`, 'info');
 
         // include metadata so callee can identify caller and optionally notify back
         const call = peer.call(currentChatUser.peerId, localStream, { metadata: { fromUsername: currentUsername, fromSocketId: socket.id } });
@@ -800,6 +1114,8 @@ async function initializeChat() {
             videoModalInstance.show();
             remoteVideoLabel.innerHTML = `<i class="fas fa-user me-1"></i>${currentChatUser.username}`;
             callWithUser.innerHTML = `<i class="fas fa-video me-2"></i>Call with ${currentChatUser.username}`;
+            callState = 'in-call';
+            startCallTimer();
         });
 
         call.on('error', (err) => {
@@ -807,17 +1123,32 @@ async function initializeChat() {
             showAlert('Call failed: ' + err.message, 'danger');
             endCall();
         });
+        call.on('close', () => {
+            endCall();
+        });
 
         socket.emit('call-user', {
             to: currentChatUser.socketId,
             from: socket.id,
             fromUsername: currentUsername,
-            fromPeerId: myPeerId,
-            signal: call
+            fromPeerId: myPeerId
         });
     }
 
     function endCall() {
+        stopRingtone();
+        
+        if (incomingCallModalInstance) {
+            incomingCallModalInstance.hide();
+        }
+
+        if (videoModalInstance) {
+            videoModalInstance.hide();
+        }
+
+        const prevState = callState;
+        callState = 'idle';
+
         if (currentCall) {
             currentCall.close();
             currentCall = null;
@@ -844,6 +1175,19 @@ async function initializeChat() {
         if (currentCallUser) {
             socket.emit('end-call', { to: currentCallUser.socketId });
             currentCallUser = null;
+        }
+        
+        if (incomingCallData) {
+            socket.emit('end-call', { to: incomingCallData.from });
+            incomingCallData = null;
+        }
+
+        pendingCallObject = null;
+        
+        if (prevState === 'calling' || prevState === 'ringing') {
+            showSystemMessage('Call Cancelled', 'warning');
+        } else if (prevState === 'in-call') {
+            showSystemMessage('Call Ended', 'info');
         }
     }
 
@@ -909,10 +1253,33 @@ async function initializeChat() {
         }
     }
 
+    // Use Web Audio API to produce a short notification beep (avoids external MP3/CORS issues)
     function playNotificationSound() {
-        const audio = new Audio('https://www.soundjay.com/misc/sounds/bell-ringing-05.mp3');
-        audio.volume = 0.3;
-        audio.play().catch(e => console.log('Audio play failed:', e));
+        try {
+            const AudioCtx = window.AudioContext || window.webkitAudioContext;
+            if (!AudioCtx) return; // not supported
+            const ctx = new AudioCtx();
+            const o = ctx.createOscillator();
+            const g = ctx.createGain();
+            o.type = 'sine';
+            o.frequency.value = 1000; // 1kHz beep
+            g.gain.value = 0.0001;
+            o.connect(g);
+            g.connect(ctx.destination);
+            // ramp up and down for pleasant sound
+            const now = ctx.currentTime;
+            g.gain.setValueAtTime(0.0001, now);
+            g.gain.exponentialRampToValueAtTime(0.12, now + 0.01);
+            o.start(now);
+            g.gain.exponentialRampToValueAtTime(0.0001, now + 0.18);
+            o.stop(now + 0.2);
+            // close context after short delay
+            setTimeout(() => {
+                try { ctx.close(); } catch (e) { /* ignore */ }
+            }, 300);
+        } catch (e) {
+            console.log('Notification tone failed:', e);
+        }
     }
 
     function escapeHtml(text) {

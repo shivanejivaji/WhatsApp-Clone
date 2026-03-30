@@ -49,6 +49,8 @@ if (io && io.engine) {
 
 // In-memory user store
 const users = new Map(); // ✅ better than object
+// recent uploads map to avoid accidental duplicate uploads (senderSocketId -> {key, ts})
+const recentUploads = new Map();
 // In-memory messages store: key = conversationId (sorted sender:receiver), value = array of messages
 // Message schema: { id, sender, receiver, message, type, username, timestamp, expiresAt }
 const messages = new Map();
@@ -206,8 +208,45 @@ io.on('connection', (socket) => {
     try {
       if (!payload?.to || !payload?.fileData) return;
 
+      // lightweight server-side dedupe: if same sender recently sent identical dedupeKey, ignore
+      try {
+        const key = payload.dedupeKey || (payload.fileName + '|' + (payload.fileData ? payload.fileData.slice(0,64) : ''));
+        const prev = recentUploads.get(socket.id);
+        if (prev && prev.key === key && (Date.now() - prev.ts) < 5000) {
+          // ignore as duplicate
+          console.debug(`Duplicate upload ignored for ${socket.id} key=${key}`);
+          cb?.({ success: false, error: 'duplicate' });
+          return;
+        }
+        recentUploads.set(socket.id, { key, ts: Date.now() });
+      } catch (e) {
+        // if dedupe check fails, continue normally
+        console.warn('Dedupe check failed', e && e.message);
+      }
+
       const toSocket = io.sockets.sockets.get(payload.to);
       const url = payload.fileData;
+
+      // Validate size and type server-side
+      try {
+        const maxBytes = 50 * 1024 * 1024; // 50MB
+        if (payload.fileData && typeof payload.fileData === 'string') {
+          // base64 length estimate: 4/3 * bytes -> approximate bytes
+          const approxBytes = Math.floor((payload.fileData.length * 3) / 4);
+          if (approxBytes > maxBytes) {
+            cb?.({ success: false, error: 'file_too_large' });
+            return;
+          }
+        }
+        const allowed = ['image', 'video', 'audio'];
+        const type = (payload.fileType || '').toLowerCase();
+        if (type && !allowed.includes(type)) {
+          cb?.({ success: false, error: 'invalid_type' });
+          return;
+        }
+      } catch (e) {
+        console.warn('Server-side validation failed', e && e.message);
+      }
 
       // persist file message
       const timestamp = new Date().toISOString();
@@ -234,17 +273,22 @@ io.on('connection', (socket) => {
 
       const messagePayload = { ...msgObj, from: msgObj.sender };
 
+      // Emit to receiver (if connected)
       if (toSocket) {
         toSocket.emit('private-message', { ...messagePayload, isOwn: false });
       }
 
+      // Emit to sender to show message in their UI
       socket.emit('private-message', { ...messagePayload, isOwn: true });
 
+      // Respond to caller with success
       cb?.({ success: true, url });
 
+      console.debug(`File uploaded: ${msgObj.mediaName} from ${socket.id} to ${payload.to}`);
+
     } catch (err) {
-      console.error("❌ File error:", err.message);
-      cb?.({ success: false });
+      console.error("❌ File error:", err && err.stack ? err.stack : err);
+      cb?.({ success: false, error: err && err.message ? err.message : 'server_error' });
     }
   });
 

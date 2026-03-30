@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
@@ -8,17 +9,18 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <title>WhatsApp Clone - Chat</title>
-    
+    <link rel="shortcut icon" href="https://img.icons8.com/fluency/48/000000/whatsapp.png">
     <!-- Bootstrap 5 CSS CDN -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <!-- Font Awesome 6 CDN -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- Custom CSS -->
     <link rel="stylesheet" href="style.css">
-    
+
     <script src="/socket.io/socket.io.js"></script>
     <script src="https://unpkg.com/peerjs@1.4.7/dist/peerjs.min.js"></script>
 </head>
+
 <body>
     <div class="app-container">
         <!-- Mobile Header - Only visible on mobile -->
@@ -55,7 +57,7 @@
                     </button>
                 </div>
             </div>
-            
+
             <div class="users-section">
                 <div class="section-header p-3 border-bottom bg-light">
                     <div class="d-flex justify-content-between align-items-center">
@@ -81,8 +83,9 @@
                 <div class="modal-dialog modal-fullscreen-sm-down modal-xl modal-dialog-centered">
                     <div class="modal-content bg-dark">
                         <div class="modal-header bg-success text-white py-2 py-sm-3">
-                            <h5 class="modal-title" id="callWithUser">
+                            <h5 class="modal-title d-flex align-items-center" id="callWithUser">
                                 <i class="fas fa-video me-2"></i>Video Call
+                                <div id="callTimer" class="call-timer ms-3">00:00</div>
                             </h5>
                             <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
                         </div>
@@ -90,7 +93,8 @@
                             <div class="row g-2 g-sm-3">
                                 <div class="col-12 col-md-6 mb-3 mb-md-0">
                                     <div class="video-wrapper bg-black rounded-3 overflow-hidden position-relative">
-                                        <video id="localVideo" autoplay muted playsinline class="w-100 h-100 object-fit-cover"></video>
+                                        <video id="localVideo" autoplay muted playsinline
+                                            class="w-100 h-100 object-fit-cover"></video>
                                         <div class="video-label bg-dark bg-opacity-75 text-white px-2 py-1 rounded">
                                             <i class="fas fa-user me-1"></i>You
                                         </div>
@@ -98,8 +102,10 @@
                                 </div>
                                 <div class="col-12 col-md-6">
                                     <div class="video-wrapper bg-black rounded-3 overflow-hidden position-relative">
-                                        <video id="remoteVideo" autoplay playsinline class="w-100 h-100 object-fit-cover"></video>
-                                        <div class="video-label bg-dark bg-opacity-75 text-white px-2 py-1 rounded" id="remoteVideoLabel">
+                                        <video id="remoteVideo" autoplay playsinline
+                                            class="w-100 h-100 object-fit-cover"></video>
+                                        <div class="video-label bg-dark bg-opacity-75 text-white px-2 py-1 rounded"
+                                            id="remoteVideoLabel">
                                             <i class="fas fa-user me-1"></i>Remote User
                                         </div>
                                     </div>
@@ -114,9 +120,18 @@
                                 <button id="disableVideoBtn" class="btn btn-secondary rounded-pill btn-sm btn-md">
                                     <i class="fas fa-video me-1"></i><span class="d-none d-sm-inline">Disable</span>
                                 </button>
-                                <button id="endCallBtn" class="btn btn-danger rounded-pill btn-sm btn-md">
-                                    <i class="fas fa-phone-slash me-1"></i><span class="d-none d-sm-inline">End Call</span>
+                                <button id="shareScreenBtn" class="btn btn-info text-white rounded-pill btn-sm btn-md">
+                                    <i class="fas fa-desktop me-1"></i><span class="d-none d-sm-inline">Share
+                                        Screen</span>
                                 </button>
+                                <button id="endCallBtn" class="btn btn-danger rounded-pill btn-sm btn-md">
+                                    <i class="fas fa-phone-slash me-1"></i><span class="d-none d-sm-inline">End
+                                        Call</span>
+                                </button>
+                            </div>
+                            <div id="screenShareIndicator" class="w-100 text-center text-info small mt-2"
+                                style="display: none;">
+                                <i class="fas fa-broadcast-tower me-1"></i>Screen Sharing ON
                             </div>
                         </div>
                     </div>
@@ -134,20 +149,29 @@
                             <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
                         </div>
                         <div class="modal-body text-center p-4">
-                            <div class="recording-timer display-4 fw-bold text-success mb-3" id="recordingTimer">0:00</div>
+                            <div class="recording-timer display-4 fw-bold text-success mb-3" id="recordingTimer">0:00
+                            </div>
                             <div class="waveform mb-4" id="waveform">
-                                <div class="wave-bar"></div><div class="wave-bar"></div><div class="wave-bar"></div>
-                                <div class="wave-bar"></div><div class="wave-bar"></div><div class="wave-bar"></div>
-                                <div class="wave-bar"></div><div class="wave-bar"></div><div class="wave-bar"></div>
+                                <div class="wave-bar"></div>
+                                <div class="wave-bar"></div>
+                                <div class="wave-bar"></div>
+                                <div class="wave-bar"></div>
+                                <div class="wave-bar"></div>
+                                <div class="wave-bar"></div>
+                                <div class="wave-bar"></div>
+                                <div class="wave-bar"></div>
+                                <div class="wave-bar"></div>
                             </div>
                             <div class="d-flex gap-2 justify-content-center flex-wrap">
                                 <button id="startRecordingBtn" class="btn btn-danger rounded-pill px-3 px-sm-4">
                                     <i class="fas fa-circle me-1"></i>Record
                                 </button>
-                                <button id="stopRecordingBtn" class="btn btn-warning rounded-pill px-3 px-sm-4" style="display: none;">
+                                <button id="stopRecordingBtn" class="btn btn-warning rounded-pill px-3 px-sm-4"
+                                    style="display: none;">
                                     <i class="fas fa-stop me-1"></i>Stop
                                 </button>
-                                <button id="sendVoiceBtn" class="btn btn-success rounded-pill px-3 px-sm-4" style="display: none;">
+                                <button id="sendVoiceBtn" class="btn btn-success rounded-pill px-3 px-sm-4"
+                                    style="display: none;">
                                     <i class="fas fa-paper-plane me-1"></i>Send
                                 </button>
                             </div>
@@ -155,6 +179,37 @@
                     </div>
                 </div>
             </div>
+
+            <!-- Incoming Call Modal -->
+            <div class="modal fade" id="incomingCallModal" tabindex="-1" data-bs-backdrop="static">
+                <div class="modal-dialog modal-dialog-centered modal-sm">
+                    <div class="modal-content bg-success text-white">
+                        <div class="modal-body text-center p-4">
+                            <div class="avatar-circle bg-white text-success mx-auto mb-3"
+                                style="width: 80px; height: 80px; font-size: 32px;">
+                                <span id="callerInitial">?</span>
+                            </div>
+                            <h4 id="callerName" class="fw-bold mb-1">Incoming Call</h4>
+                            <p class="opacity-75 mb-4">WhatsApp Video Call</p>
+                            <div class="d-flex justify-content-center gap-4">
+                                <button id="rejectCallBtn" class="btn btn-danger rounded-circle p-3"
+                                    style="width: 60px; height: 60px;">
+                                    <i class="fas fa-phone-slash fa-lg"></i>
+                                </button>
+                                <button id="acceptCallBtn" class="btn btn-light text-success rounded-circle p-3"
+                                    style="width: 60px; height: 60px;">
+                                    <i class="fas fa-phone fa-lg"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Ringtone -->
+            <audio id="ringtone" loop>
+                <source src="https://assets.mixkit.co/active_storage/sfx/1359/1359-preview.mp3" type="audio/mpeg">
+            </audio>
 
             <!-- Chat Header -->
             <div class="chat-header bg-white border-bottom p-2 p-sm-3" id="chatHeader">
@@ -175,7 +230,8 @@
                         </div>
                     </div>
                     <div class="d-flex gap-2">
-                        <button id="voiceMessageBtn" class="btn btn-outline-success rounded-circle" style="display: none;" title="Voice Message">
+                        <button id="voiceMessageBtn" class="btn btn-outline-success rounded-circle"
+                            style="display: none;" title="Voice Message">
                             <i class="fas fa-microphone-alt"></i>
                         </button>
                         <button id="startCallBtn" class="btn btn-success rounded-pill" style="display: none;">
@@ -184,7 +240,7 @@
                     </div>
                 </div>
             </div>
-            
+
             <!-- Chat Messages Area -->
             <div class="chat-messages flex-grow-1 p-2 p-sm-3 overflow-auto" id="chatMessages">
                 <div class="text-center py-5">
@@ -192,18 +248,20 @@
                     <p class="text-muted px-3">👋 Welcome!<br>Select a user to start chatting</p>
                 </div>
             </div>
-            
+
             <!-- Chat Input -->
-            <div class="chat-input-container bg-white border-top p-2 p-sm-3" id="chatInputContainer" style="display: none;">
+            <div class="chat-input-container bg-white border-top p-2 p-sm-3" id="chatInputContainer"
+                style="display: none;">
                 <div class="input-group">
-                    <button id="attachFileBtn" class="btn btn-outline-secondary rounded-circle me-2" title="Attach file">
+                    <button id="attachFileBtn" class="btn btn-outline-secondary rounded-circle me-2"
+                        title="Attach file">
                         <i class="fas fa-paperclip"></i>
                     </button>
                     <button id="emojiBtn" class="btn btn-outline-secondary rounded-circle me-2" title="Emoji">
                         <i class="far fa-smile"></i>
                     </button>
-                    <input type="text" id="messageInput" class="form-control rounded-pill" 
-                           placeholder="Type a message" autocomplete="off" enterkeyhint="send">
+                    <input type="text" id="messageInput" class="form-control rounded-pill" placeholder="Type a message"
+                        autocomplete="off" enterkeyhint="send">
                     <button id="sendBtn" class="btn btn-success rounded-circle ms-2">
                         <i class="fas fa-paper-plane"></i>
                     </button>
@@ -220,12 +278,14 @@
 
     <!-- Footer -->
     <footer class="app-footer bg-white border-top py-2 d-none d-md-flex align-items-center justify-content-center">
-        <div class="text-muted small">© 2026 WhatsApp Clone — Built for learning. Developed by Jivaji Shivane<span class="ms-2">v1.0</span></div>
+        <div class="text-muted small">© 2026 WhatsApp Clone — Built for learning. Developed by Jivaji Shivane<span
+                class="ms-2">v1.0</span></div>
     </footer>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-    <!-- Emoji picker -->
-    <script src="https://unpkg.com/@joeattardi/emoji-button@4.6.2/dist/index.min.js"></script>
+    <!-- Emoji picker (load as module to match package format) -->
+    <script type="module" src="https://cdn.jsdelivr.net/npm/@joeattardi/emoji-button@4.6.2/dist/index.min.js"></script>
     <script src="script.js"></script>
 </body>
+
 </html>
