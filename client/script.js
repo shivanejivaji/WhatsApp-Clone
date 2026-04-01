@@ -94,6 +94,7 @@ async function initializeChat() {
     const callWithUser = document.getElementById('callWithUser');
     const remoteVideoLabel = document.getElementById('remoteVideoLabel');
     const attachFileBtn = document.getElementById('attachFileBtn');
+    const emojiBtn = document.getElementById('emojiBtn');
     const fileInput = document.getElementById('fileInput');
     const startRecordingBtn = document.getElementById('startRecordingBtn');
     const stopRecordingBtn = document.getElementById('stopRecordingBtn');
@@ -233,8 +234,23 @@ async function initializeChat() {
         callState = 'idle';
     }
 
-    // Mobile sidebar toggle controls
-    const menuToggleBtn = document.getElementById('menuToggleBtn');
+    // Initialize Emoji Picker
+    if (emojiBtn && typeof EmojiButton !== 'undefined') {
+        const picker = new EmojiButton({
+            position: 'top-start',
+            theme: 'light',
+            autoHide: true
+        });
+
+        picker.on('emoji', selection => {
+            messageInput.value += selection.emoji;
+            messageInput.focus();
+        });
+
+        emojiBtn.addEventListener('click', () => {
+            picker.togglePicker(emojiBtn);
+        });
+    }
     const menuOverlay = document.getElementById('menuOverlay');
     const sidebar = document.getElementById('sidebar');
     const backToUsersBtn = document.getElementById('backToUsersBtn');
@@ -576,9 +592,12 @@ async function initializeChat() {
             
             // Replace track in PeerConnection
             const videoTrack = screenStream.getVideoTracks()[0];
-            const sender = currentCall.peerConnection.getSenders().find(s => s.track.kind === 'video');
-            if (sender) {
-                sender.replaceTrack(videoTrack);
+            if (currentCall && currentCall.peerConnection) {
+                const senders = currentCall.peerConnection.getSenders();
+                const sender = senders.find(s => s.track && s.track.kind === 'video');
+                if (sender) {
+                    sender.replaceTrack(videoTrack);
+                }
             }
             
             // Update UI
@@ -614,9 +633,12 @@ async function initializeChat() {
         // Switch back to camera
         if (localStream) {
             const videoTrack = localStream.getVideoTracks()[0];
-            const sender = currentCall?.peerConnection.getSenders().find(s => s.track.kind === 'video');
-            if (sender && videoTrack) {
-                sender.replaceTrack(videoTrack);
+            if (currentCall && currentCall.peerConnection && videoTrack) {
+                const senders = currentCall.peerConnection.getSenders();
+                const sender = senders.find(s => s.track && s.track.kind === 'video');
+                if (sender) {
+                    sender.replaceTrack(videoTrack);
+                }
             }
             localVideo.srcObject = localStream;
         }
@@ -1168,6 +1190,9 @@ async function initializeChat() {
     function endCall() {
         stopRingtone();
         
+        // ensure screen sharing is cleaned up if active
+        try { if (screenStream) stopScreenShare(); } catch (e) { console.warn('Error stopping screen share on endCall', e); }
+
         if (incomingCallModalInstance) {
             incomingCallModalInstance.hide();
         }
@@ -1214,6 +1239,9 @@ async function initializeChat() {
 
         pendingCallObject = null;
         
+        // Reset call timer UI
+        resetCallTimer();
+
         if (prevState === 'calling' || prevState === 'ringing') {
             showSystemMessage('Call Cancelled', 'warning');
         } else if (prevState === 'in-call') {

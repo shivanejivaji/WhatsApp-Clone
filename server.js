@@ -363,6 +363,9 @@ io.on('connection', (socket) => {
   socket.on('disconnect', () => {
     const user = users.get(socket.id);
 
+    // Clean up recent uploads for this socket
+    recentUploads.delete(socket.id);
+
     if (user) {
       users.delete(socket.id);
 
