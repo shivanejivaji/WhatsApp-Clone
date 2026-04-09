@@ -187,8 +187,10 @@ async function initializeChat() {
         incomingCallModalInstance.hide();
         
         socket.emit('answer-call', { to: incomingCallData.from });
-        
-        const ok = await startLocalVideo();
+
+        // If caller requested audio-only, prefer audio acquisition
+        const wantsAudioOnly = !!(pendingCallObject && pendingCallObject.metadata && pendingCallObject.metadata.audioOnly) || !!incomingCallData?.audioOnly;
+        const ok = wantsAudioOnly ? await startLocalAudio() : await startLocalVideo();
         if (!ok) {
             showAlert('Unable to access camera/mic to answer the call', 'danger');
             handleRejectCall();
@@ -206,7 +208,7 @@ async function initializeChat() {
                 remoteVideo.srcObject = stream;
                 videoModalInstance.show();
                 remoteVideoLabel.innerHTML = `<i class="fas fa-user me-1"></i>${incomingCallData.fromUsername}`;
-                callWithUser.innerHTML = `<i class="fas fa-video me-2"></i>Call with ${incomingCallData.fromUsername}`;
+                callWithUser.innerHTML = wantsAudioOnly ? `<i class="fas fa-phone me-2"></i>Voice call with ${incomingCallData.fromUsername}` : `<i class="fas fa-video me-2"></i>Call with ${incomingCallData.fromUsername}`;
                 startCallTimer();
             });
 
@@ -518,6 +520,15 @@ async function initializeChat() {
         if (currentChatUser) {
             await startCall();
         }
+    });
+
+    // Voice call button (audio-only)
+    voiceCallBtn.addEventListener('click', async () => {
+        if (!currentChatUser) {
+            showAlert('Please select a user to call', 'warning');
+            return;
+        }
+        await startVoiceCall();
     });
 
     // Voice message button
@@ -1171,6 +1182,29 @@ async function initializeChat() {
         }
     }
 
+    async function startLocalAudio() {
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            // stop any previous localStream tracks to avoid duplicates
+            if (localStream && localStream !== stream) {
+                try { localStream.getTracks().forEach(t => t.stop()); } catch (e) {}
+            }
+            localStream = stream;
+            // do not set localVideo for audio-only
+            return true;
+        } catch (err) {
+            console.error('Error accessing microphone:', err);
+            if (err && err.name === 'NotAllowedError') {
+                showAlert('Microphone permission denied. Please allow microphone access.', 'danger');
+            } else if (err && err.name === 'NotFoundError') {
+                showAlert('No microphone found on this device.', 'danger');
+            } else {
+                showAlert('Error accessing microphone: ' + (err && err.message ? err.message : String(err)), 'danger');
+            }
+            return false;
+        }
+    }
+
     async function startCall() {
         if (!currentChatUser) {
             showAlert('Please select a user to call', 'warning');
@@ -1216,6 +1250,54 @@ async function initializeChat() {
             from: socket.id,
             fromUsername: currentUsername,
             fromPeerId: myPeerId
+        });
+    }
+
+    async function startVoiceCall() {
+        if (!currentChatUser) {
+            showAlert('Please select a user to call', 'warning');
+            return;
+        }
+        if (callState !== 'idle') return;
+
+        // get microphone only
+        const ok = await startLocalAudio();
+        if (!ok) return;
+
+        currentCallUser = currentChatUser;
+        callState = 'calling';
+        showSystemMessage(`Calling ${currentChatUser.username} (voice)...`, 'info');
+
+        const call = peer.call(currentChatUser.peerId, localStream, { metadata: { fromUsername: currentUsername, fromSocketId: socket.id, audioOnly: true } });
+        currentCall = call;
+
+        call.on('stream', (stream) => {
+            remoteStream = stream;
+            // attach to remoteVideo (video element) which can play audio-only streams
+            remoteVideo.srcObject = stream;
+            videoModalInstance.show();
+            remoteVideoLabel.innerHTML = `<i class="fas fa-user me-1"></i>${currentChatUser.username}`;
+            callWithUser.innerHTML = `<i class="fas fa-phone me-2"></i>Voice call with ${currentChatUser.username}`;
+            callState = 'in-call';
+            startCallTimer();
+        });
+
+        call.on('error', (err) => {
+            console.error('Voice call error:', err);
+            showAlert('Call failed: ' + (err && err.message ? err.message : String(err)), 'danger');
+            endCall();
+        });
+
+        call.on('close', () => {
+            endCall();
+        });
+
+        socket.emit('call-user', {
+            to: currentChatUser.socketId,
+            from: socket.id,
+            fromUsername: currentUsername,
+            fromPeerId: myPeerId,
+            audioOnly: true
         });
     }
 
