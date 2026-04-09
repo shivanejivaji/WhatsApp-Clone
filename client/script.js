@@ -77,6 +77,7 @@ async function initializeChat() {
     const messageInput = document.getElementById('messageInput');
     const sendBtn = document.getElementById('sendBtn');
     const startCallBtn = document.getElementById('startCallBtn');
+    const voiceCallBtn = document.getElementById('voiceCallBtn');
     const voiceMessageBtn = document.getElementById('voiceMessageBtn');
     const chatWithUser = document.getElementById('chatWithUser');
     const userStatus = document.getElementById('userStatus');
@@ -288,13 +289,40 @@ async function initializeChat() {
     currentRoomElem.textContent = `Room: ${currentRoom}`;
     userInitial.textContent = currentUsername.charAt(0).toUpperCase();
 
-    // Initialize Socket.IO using long-polling first to avoid WebSocket "Invalid frame header" errors
-    // If you need true WebSocket transport, check server/proxy TLS and upgrade handling.
-    socket = io({
-        transports: ['polling'], // force polling to avoid websocket frame errors
+    // Initialize Socket.IO with explicit origin and allow polling + websocket transports.
+    // This provides a graceful upgrade path but also lets us debug transport errors.
+    const serverOrigin = window.location.origin;
+    socket = io(serverOrigin, {
+        transports: ['polling', 'websocket'],
         reconnection: true,
         reconnectionAttempts: Infinity,
         timeout: 20000
+    });
+
+    // Extra logging to help diagnose transport issues
+    socket.on('error', (err) => {
+        console.error('Socket generic error:', err);
+    });
+
+    socket.on('connect_error', (err) => {
+        console.warn('Socket connect_error:', err && err.message ? err.message : err);
+    });
+
+    // If polling repeatedly fails, try forcing websocket transport as a fallback (useful behind some proxies)
+    let connectErrorCount = 0;
+    socket.on('connect_error', (err) => {
+        connectErrorCount++;
+        if (connectErrorCount >= 3) {
+            console.warn('Multiple connect errors — retrying with websocket-only transport');
+            try {
+                socket.close();
+            } catch (e) {}
+            socket = io(serverOrigin, {
+                transports: ['websocket'],
+                reconnection: true,
+                timeout: 20000
+            });
+        }
     });
 
     // Connection error handling
@@ -319,12 +347,14 @@ async function initializeChat() {
         try { endCall(); } catch (e) { /* ignore */ }
     });
 
-    // Initialize PeerJS
+    // Initialize PeerJS — prefer local peer server at /peerjs when available
+    const peerHost = window.location.hostname;
+    const peerPort = window.location.port || (window.location.protocol === 'https:' ? 443 : 80);
     peer = new Peer({
-        host: '0.peerjs.com',
-        port: 443,
-        secure: true,
-        path: '/'
+        host: peerHost,
+        port: peerPort,
+        secure: window.location.protocol === 'https:',
+        path: '/peerjs'
     });
 
     // PeerJS events
@@ -721,6 +751,8 @@ async function initializeChat() {
         chatInputContainer.style.display = 'block';
         startCallBtn.style.display = 'flex';
         voiceMessageBtn.style.display = 'flex';
+        // show voice call button in header
+        if (voiceCallBtn) voiceCallBtn.style.display = 'inline-flex';
 
         chatMessages.innerHTML = '';
         // request chat history with selected user
@@ -1292,6 +1324,7 @@ async function initializeChat() {
         chatInputContainer.style.display = 'none';
         startCallBtn.style.display = 'none';
         voiceMessageBtn.style.display = 'none';
+        if (voiceCallBtn) voiceCallBtn.style.display = 'none';
         chatMessages.innerHTML = `
             <div class="text-center py-5">
                 <i class="fas fa-comments fa-3x text-muted mb-3"></i>

@@ -342,7 +342,8 @@ io.on('connection', (socket) => {
       toSocket.emit('incoming-call', {
         from: socket.id,
         fromUsername: data.fromUsername,
-        fromPeerId: data.fromPeerId
+        fromPeerId: data.fromPeerId,
+        offer: data.offer // Forward SDP offer if provided
       });
     }
   });
@@ -357,6 +358,28 @@ io.on('connection', (socket) => {
 
   socket.on('end-call', (data) => {
     io.to(data.to).emit('call-ended', { from: socket.id });
+  });
+
+  // ================= WEBRTC SIGNALING =================
+  socket.on('offer', (data) => {
+    io.to(data.to).emit('offer', {
+      offer: data.offer,
+      from: socket.id
+    });
+  });
+
+  socket.on('answer', (data) => {
+    io.to(data.to).emit('answer', {
+      answer: data.answer,
+      from: socket.id
+    });
+  });
+
+  socket.on('ice-candidate', (data) => {
+    io.to(data.to).emit('ice-candidate', {
+      candidate: data.candidate,
+      from: socket.id
+    });
   });
 
   // ================= DISCONNECT =================
